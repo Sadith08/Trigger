@@ -74,6 +74,27 @@ jobs:
 
           echo "access_token=$TOKEN" >> "$GITHUB_OUTPUT"
 
+      - name: Probar acceso - listar workspaces
+        shell: bash
+        run: |
+          echo "Listando workspaces visibles para el SP..."
+          curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
+            "https://api.fabric.microsoft.com/v1/workspaces" | jq .
+      
+      - name: Probar acceso - listar items del workspace
+        shell: bash
+        run: |
+          echo "Listando items del workspace ${{ secrets.FABRIC_WORKSPACE_ID }}..."
+          curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
+            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items" | jq .
+      
+      - name: Probar acceso-  obtener item específico (pipeline)
+        shell: bash
+        run: |
+          echo "Obteniendo el item (pipeline) por ID..."
+          curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
+            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}" | jq .
+
       - name: Ejecutar pipeline en Microsoft Fabric
         shell: bash
         run: |
