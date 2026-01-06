@@ -1,0 +1,7 @@
+
+{
+  "task_type": "classification",
+  "dataset_path": "files/input/data.csv",
+  "target_column": "label",
+  "primary_metric": "accuracy"
+}
