@@ -20,82 +20,86 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2   # para poder comparar HEAD~1
+          fetch-depth: 2
 
       - name: Determinar el archivo JSON
         id: pick-file
         shell: bash
         run: |
           set -e
+
           FILE_INPUT="${{ github.event.inputs.json_path }}"
           if [ -n "$FILE_INPUT" ] && [ -f "$FILE_INPUT" ]; then
             FILE="$FILE_INPUT"
           else
-            # Si es push, detectar el json modificado; si no, tomar el primero
             FILE=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -E '^prompts/.*\.json$' | head -n 1 || true)
             if [ -z "$FILE" ]; then
-              FILE=$(ls prompts/*.json | head -n 1)
+              FILE=$(ls prompts/*.json | head -n 1 || true)
             fi
           fi
 
-          if [ ! -f "$FILE" ]; then
+          if [ -z "$FILE" ] || [ ! -f "$FILE" ]; then
             echo "No se encontró un archivo JSON válido en prompts/"; exit 1
           fi
 
           echo "Usando archivo: $FILE"
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
 
-      - name: Leer JSON
-        id: read-json
+      - name: Validar JSON
+        id: validate-json
         shell: bash
         run: |
           set -e
           FILE="${{ steps.pick-file.outputs.file }}"
-          echo "Validando y leyendo: $FILE"
-
-          # Validar que sea JSON válido
+          echo "Validando: $FILE"
           jq . "$FILE" > /dev/null
-
-          CONTENT=$(cat "$FILE")
-          {
-            echo 'content<<EOF'
-            echo "$CONTENT"
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
 
       - name: Obtener token Azure AD
         id: token
         shell: bash
         run: |
           set -e
+
           RESP=$(curl -s -X POST \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "client_id=${{ secrets.AZURE_CLIENT_ID }}&scope=https%3A%2F%2Fapi.fabric.microsoft.com%2F.default&client_secret=${{ secrets.AZURE_CLIENT_SECRET }}&grant_type=client_credentials" \
             "https://login.microsoftonline.com/${{ secrets.AZURE_TENANT_ID }}/oauth2/v2.0/token")
 
-          echo "$RESP" | jq . > /dev/null
+          echo "$RESP" | jq . > /dev/null || { echo "Respuesta inválida al solicitar token"; echo "$RESP"; exit 1; }
+
           TOKEN=$(echo "$RESP" | jq -r .access_token)
           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
             echo "No se obtuvo access_token"; exit 1
           fi
+
           echo "access_token=$TOKEN" >> "$GITHUB_OUTPUT"
 
       - name: Ejecutar pipeline en Microsoft Fabric
         shell: bash
         run: |
           set -e
-          JSON="${{ steps.read-json.outputs.content }}"
 
-          BODY=$(jq -n --argjson params "$JSON" \
-            '{ jobParameters: { payload: $params } }')
+          FILE="${{ steps.pick-file.outputs.file }}"
+
+          # Construir el body leyendo directamente el JSON del archivo
+          BODY=$(jq -n --slurpfile params "$FILE" \
+            '{ jobParameters: { payload: $params[0] } }')
 
           echo "Payload enviado a Fabric:"
           echo "$BODY" | jq
 
-          RES=$(curl -s -X POST \
+          RES=$(curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X POST \
             -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H "Content-Type: application/json" \
             -d "$BODY" \
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs")
 
-          echo "$RES" | jq .
+          HTTP_STATUS=$(echo "$RES" | tr -d '\r' | sed -n 's/HTTP_STATUS://p')
+          BODY_RES=$(echo "$RES" | sed '/HTTP_STATUS:/d')
+
+          echo "Respuesta de Fabric (status $HTTP_STATUS):"
+          echo "$BODY_RES" | jq . || echo "$BODY_RES"
+
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "La API de Fabric devolvió error (HTTP $HTTP_STATUS)"; exit 1
+          fi
