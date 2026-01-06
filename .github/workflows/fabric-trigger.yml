@@ -4,8 +4,13 @@ name: Trigger Fabric Pipeline
 on:
   push:
     paths:
-      - 'prompts/*.json'   # Se activa solo si subes un JSON en la carpeta prompts
-  workflow_dispatch:       # Permite ejecución manual desde Actions
+      - 'prompts/*.json'
+  workflow_dispatch:
+    inputs:
+      json_path:
+        description: 'Ruta del JSON a usar (opcional, p.ej. prompts/Test1.json)'
+        required: false
+        default: ''
 
 jobs:
   run-fabric-pipeline:
@@ -14,44 +19,83 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # para poder comparar HEAD~1
 
       - name: Determinar el archivo JSON
         id: pick-file
+        shell: bash
         run: |
-          FILE=$(git diff --name-only HEAD~1 HEAD | grep '^prompts/.*\.json$' | head -n 1 || true)
-          if [ -z "$FILE" ]; then
-            FILE=$(ls prompts/*.json | head -n 1)
+          set -e
+          FILE_INPUT="${{ github.event.inputs.json_path }}"
+          if [ -n "$FILE_INPUT" ] && [ -f "$FILE_INPUT" ]; then
+            FILE="$FILE_INPUT"
+          else
+            # Si es push, detectar el json modificado; si no, tomar el primero
+            FILE=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -E '^prompts/.*\.json$' | head -n 1 || true)
+            if [ -z "$FILE" ]; then
+              FILE=$(ls prompts/*.json | head -n 1)
+            fi
           fi
-          echo "file=$FILE" >> $GITHUB_OUTPUT
+
+          if [ ! -f "$FILE" ]; then
+            echo "No se encontró un archivo JSON válido en prompts/"; exit 1
+          fi
+
+          echo "Usando archivo: $FILE"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
 
       - name: Leer JSON
         id: read-json
+        shell: bash
         run: |
-          CONTENT=$(cat "${{ steps.pick-file.outputs.file }}")
-          echo "$CONTENT" | jq . > /dev/null
-          echo "content=$CONTENT" >> $GITHUB_OUTPUT
+          set -e
+          FILE="${{ steps.pick-file.outputs.file }}"
+          echo "Validando y leyendo: $FILE"
+
+          # Validar que sea JSON válido
+          jq . "$FILE" > /dev/null
+
+          CONTENT=$(cat "$FILE")
+          {
+            echo 'content<<EOF'
+            echo "$CONTENT"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Obtener token Azure AD
         id: token
+        shell: bash
         run: |
-          TOKEN=$(curl -s -X POST \
+          set -e
+          RESP=$(curl -s -X POST \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "client_id=${{ secrets.AZURE_CLIENT_ID }}&scope=https%3A%2F%2Fapi.fabric.microsoft.com%2F.default&client_secret=${{ secrets.AZURE_CLIENT_SECRET }}&grant_type=client_credentials" \
-            https://login.microsoftonline.com/${{ secrets.AZURE_TENANT_ID }}/oauth2/v2.0/token | jq -r .access_token)
-          echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
+            "https://login.microsoftonline.com/${{ secrets.AZURE_TENANT_ID }}/oauth2/v2.0/token")
+
+          echo "$RESP" | jq . > /dev/null
+          TOKEN=$(echo "$RESP" | jq -r .access_token)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "No se obtuvo access_token"; exit 1
+          fi
+          echo "access_token=$TOKEN" >> "$GITHUB_OUTPUT"
 
       - name: Ejecutar pipeline en Microsoft Fabric
+        shell: bash
         run: |
-          BODY=$(jq -n \
-            --argjson params "${{ steps.read-json.outputs.content }}" \
+          set -e
+          JSON="${{ steps.read-json.outputs.content }}"
+
+          BODY=$(jq -n --argjson params "$JSON" \
             '{ jobParameters: { payload: $params } }')
 
           echo "Payload enviado a Fabric:"
           echo "$BODY" | jq
 
-          curl -s -X POST \
+          RES=$(curl -s -X POST \
             -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H "Content-Type: application/json" \
             -d "$BODY" \
-            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs" \
-            | jq .
+            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs")
+
+          echo "$RES" | jq .
