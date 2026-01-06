@@ -4,8 +4,8 @@ name: Trigger Fabric Pipeline
 on:
   push:
     paths:
-      - 'prompts/*.json'   # Se activa solo cuando hay cambios en JSON dentro de /prompts
-  workflow_dispatch:       # Permite ejecución manual desde la pestaña Actions
+      - 'prompts/*.json'   # Se activa solo si subes un JSON en la carpeta prompts
+  workflow_dispatch:       # Permite ejecución manual desde Actions
 
 jobs:
   run-fabric-pipeline:
@@ -15,23 +15,19 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Determinar el archivo JSON del evento
+      - name: Determinar el archivo JSON
         id: pick-file
         run: |
-          # Caso 1: viene de un push. Tomamos el primer archivo modificado en prompts/*.json
           FILE=$(git diff --name-only HEAD~1 HEAD | grep '^prompts/.*\.json$' | head -n 1 || true)
-          # Caso 2: ejecución manual: si no hay diff, tomamos el primer JSON disponible
           if [ -z "$FILE" ]; then
             FILE=$(ls prompts/*.json | head -n 1)
           fi
           echo "file=$FILE" >> $GITHUB_OUTPUT
-          echo "Usando JSON: $FILE"
 
-      - name: Leer JSON y validar formato
+      - name: Leer JSON
         id: read-json
         run: |
           CONTENT=$(cat "${{ steps.pick-file.outputs.file }}")
-          # Validar que sea JSON válido con jq
           echo "$CONTENT" | jq . > /dev/null
           echo "content=$CONTENT" >> $GITHUB_OUTPUT
 
@@ -42,20 +38,15 @@ jobs:
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "client_id=${{ secrets.AZURE_CLIENT_ID }}&scope=https%3A%2F%2Fapi.fabric.microsoft.com%2F.default&client_secret=${{ secrets.AZURE_CLIENT_SECRET }}&grant_type=client_credentials" \
             https://login.microsoftonline.com/${{ secrets.AZURE_TENANT_ID }}/oauth2/v2.0/token | jq -r .access_token)
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "No se pudo obtener el token. Revisa los secretos/permiso del SP." >&2
-            exit 1
-          fi
           echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
 
-      - name: Ejecutar pipeline en Microsoft Fabric (pasando todo el JSON)
+      - name: Ejecutar pipeline en Microsoft Fabric
         run: |
-          # El endpoint de Fabric espera un objeto con "jobParameters"
           BODY=$(jq -n \
             --argjson params "${{ steps.read-json.outputs.content }}" \
-            '{ jobParameters: $params }')
+            '{ jobParameters: { payload: $params } }')
 
-          echo "Payload a Fabric:"
+          echo "Payload enviado a Fabric:"
           echo "$BODY" | jq
 
           curl -s -X POST \
