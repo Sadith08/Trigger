@@ -1,0 +1,45 @@
+
+name: Trigger Fabric Pipeline
+
+on:
+  push:
+    paths:
+      - 'prompts/*.json'   # Se activa solo si subes un JSON en la carpeta prompts
+  workflow_dispatch:       # Permite ejecución manual desde Actions
+
+jobs:
+  run-fabric-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Leer archivo JSON
+        id: read-json
+        run: |
+          FILE=$(ls prompts/*.json | head -n 1)
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          CONTENT=$(cat $FILE)
+          echo "content=$CONTENT" >> $GITHUB_OUTPUT
+
+      - name: Obtener token Azure AD
+        id: token
+        run: |
+          TOKEN=$(curl -s -X POST \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "client_id=${{ secrets.AZURE_CLIENT_ID }}&scope=https%3A%2F%2Fapi.fabric.microsoft.com%2F.default&client_secret=${{ secrets.AZURE_CLIENT_SECRET }}&grant_type=client_credentials" \
+            https://login.microsoftonline.com/${{ secrets.AZURE_TENANT_ID }}/oauth2/v2.0/token | jq -r .access_token)
+          echo "access_token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Ejecutar pipeline en Microsoft Fabric
+        run: |
+          BODY=$(jq -n \
+            --argjson params "${{ steps.read-json.outputs.content }}" \
+            '{ jobParameters: $params }')
+
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
+            -H "Content-Type: application/json" \
+            -d "$BODY" \
+            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs"
