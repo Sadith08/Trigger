@@ -95,15 +95,23 @@ jobs:
           curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}" | jq .
 
-
-      - name: Ejecutar pipeline en Microsoft Fabric
+      - name: Ejecutar Data Pipeline (job instance)
         shell: bash
         run: |
           set -e
           FILE="${{ steps.pick-file.outputs.file }}"
-          # Construir body con runParameters (no jobParameters)
+      
+          # Si tu pipeline tiene un parámetro llamado "payload", dejamos tu JSON ahí.
+          # Ajusta "payload" por el NOMBRE EXACTO del parámetro definido en tu pipeline.
           BODY=$(jq -n --slurpfile params "$FILE" \
-            '{ runParameters: { payload: $params[0] } }')
+            '{ 
+               executionData: { 
+                 # Opcional pero recomendable: el displayName del pipeline
+                 pipelineName: "pl_get_data_github",
+                 # Si tu pipeline no usa parámetros, elimina la línea de payload.
+                 payload: $params[0]
+               } 
+             }')
       
           echo "Payload enviado a Fabric:"
           echo "$BODY" | jq
@@ -112,7 +120,7 @@ jobs:
             -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H "Content-Type: application/json" \
             -d "$BODY" \
-            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/pipelines/${{ secrets.FABRIC_PIPELINE_ID }}/run")
+            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs/instances?jobType=Pipeline")
       
           HTTP_STATUS=$(echo "$RES" | tr -d '\r' | sed -n 's/HTTP_STATUS://p')
           BODY_RES=$(echo "$RES" | sed '/HTTP_STATUS:/d')
@@ -123,4 +131,7 @@ jobs:
           if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
             echo "La API de Fabric devolvió error (HTTP $HTTP_STATUS)"; exit 1
           fi
-
+      
+          # Si quieres capturar el id de la instancia para hacer polling:
+          INSTANCE_ID=$(echo "$BODY_RES" | jq -r '.id // .instanceId // empty')
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
