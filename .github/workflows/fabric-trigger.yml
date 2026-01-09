@@ -95,32 +95,32 @@ jobs:
           curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}" | jq .
 
+
       - name: Ejecutar pipeline en Microsoft Fabric
         shell: bash
         run: |
           set -e
-
           FILE="${{ steps.pick-file.outputs.file }}"
-
-          # Construir el body leyendo directamente el JSON del archivo
+          # Construir body con runParameters (no jobParameters)
           BODY=$(jq -n --slurpfile params "$FILE" \
-            '{ jobParameters: { payload: $params[0] } }')
-
+            '{ runParameters: { payload: $params[0] } }')
+      
           echo "Payload enviado a Fabric:"
           echo "$BODY" | jq
-
+      
           RES=$(curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X POST \
             -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H "Content-Type: application/json" \
             -d "$BODY" \
-            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs")
-
+            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/pipelines/${{ secrets.FABRIC_PIPELINE_ID }}/run")
+      
           HTTP_STATUS=$(echo "$RES" | tr -d '\r' | sed -n 's/HTTP_STATUS://p')
           BODY_RES=$(echo "$RES" | sed '/HTTP_STATUS:/d')
-
+      
           echo "Respuesta de Fabric (status $HTTP_STATUS):"
           echo "$BODY_RES" | jq . || echo "$BODY_RES"
-
+      
           if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
             echo "La API de Fabric devolvió error (HTTP $HTTP_STATUS)"; exit 1
           fi
+
