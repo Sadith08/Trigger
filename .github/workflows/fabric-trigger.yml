@@ -94,6 +94,13 @@ jobs:
           echo "Obteniendo el item (pipeline) por ID..."
           curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}" | jq .
+            
+      - name: Obtener DataPipeline
+        shell: bash
+        run: |
+          echo "Obteniendo el item (pipeline) por ID..."
+          curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
+            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/dataPipelines" | jq .
 
       - name: Ejecutar Data Pipeline (job instance)
         shell: bash
