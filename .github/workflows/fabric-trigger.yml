@@ -114,7 +114,7 @@ jobs:
             '{ 
                executionData: { 
                  # Opcional pero recomendable: el displayName del pipeline
-                 pipelineName: "pl_get_data_github",
+                 pipelineName: "pl_PSI",
                  # Si tu pipeline no usa parámetros, elimina la línea de payload.
                  payload: $params[0]
                } 
