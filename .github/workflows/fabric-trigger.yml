@@ -105,40 +105,43 @@ jobs:
       - name: Ejecutar Data Pipeline (job instance)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           FILE="${{ steps.pick-file.outputs.file }}"
-      
-          # Si tu pipeline tiene un parámetro llamado "payload", dejamos tu JSON ahí.
-          # Ajusta "payload" por el NOMBRE EXACTO del parámetro definido en tu pipeline.
-          BODY=$(jq -n --slurpfile params "$FILE" \
-            '{ 
-               executionData: { 
-                 # Opcional pero recomendable: el displayName del pipeline
-                 pipelineName: "pl_PSI",
-                 # Si tu pipeline no usa parámetros, elimina la línea de payload.
-                 payload: $params[0]
-               } 
+
+          # 1) JSON del archivo -> STRING (una sola línea)
+          PAYLOAD_STR=$(jq -c . "$FILE")
+
+          # 2) Construimos el body con parameters como LISTA (name/value)
+          BODY=$(jq -n \
+            --arg pipelineName "pl_PSI" \
+            --arg payload "$PAYLOAD_STR" \
+            '{
+               executionData: {
+                 pipelineName: $pipelineName,
+                 parameters: [
+                   { "name": "payload", "value": $payload }
+                 ]
+               }
              }')
-      
-          echo "Payload enviado a Fabric:"
-          echo "$BODY" | jq
-      
+
+          echo "Payload enviado a Fabric (primeros 300 chars):"
+          echo "$BODY" | jq -r '.executionData.parameters[0].value' | head -c 300; echo
+
           RES=$(curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X POST \
             -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H "Content-Type: application/json" \
             -d "$BODY" \
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs/instances?jobType=Pipeline")
-      
+
           HTTP_STATUS=$(echo "$RES" | tr -d '\r' | sed -n 's/HTTP_STATUS://p')
           BODY_RES=$(echo "$RES" | sed '/HTTP_STATUS:/d')
-      
+
           echo "Respuesta de Fabric (status $HTTP_STATUS):"
           echo "$BODY_RES" | jq . || echo "$BODY_RES"
-      
+
           if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
             echo "La API de Fabric devolvió error (HTTP $HTTP_STATUS)"; exit 1
           fi
-      
-          # Si quieres capturar el id de la instancia para hacer polling:
+
           INSTANCE_ID=$(echo "$BODY_RES" | jq -r '.id // .instanceId // empty')
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
