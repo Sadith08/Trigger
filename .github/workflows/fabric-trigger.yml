@@ -53,18 +53,6 @@ jobs:
           echo "Validando: $FILE"
           jq . "$FILE" > /dev/null
 
-      # --- OPCIONAL HABILITADO: genera {"payload":"Hola"} y lo prioriza ---
-      - name: (Opcional) Crear un JSON mínimo {"payload":"Hola"}
-        id: override-file
-        if: ${{ false }}  # <--- habilitado
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p prompts
-          echo '{"payload":"Hola"}' > prompts/demo_hola.json
-          echo "Se creó prompts/demo_hola.json con {\"payload\":\"Hola\"}"
-          echo "file=prompts/demo_hola.json" >> "$GITHUB_OUTPUT"
-
       - name: Obtener token Azure AD
         id: token
         shell: bash
@@ -119,22 +107,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Elegir archivo: override (si existe) o el detectado
           FILE="${{ steps.pick-file.outputs.file }}"
-          OVERRIDE="${{ steps.override-file.outputs.file }}"
-          if [ -n "${OVERRIDE:-}" ]; then
-            FILE="$OVERRIDE"
-          fi
-
           echo "Archivo a enviar como payload: $FILE"
 
-          # Opción A (comentada): Forzar "Hola" como string
-          # PAYLOAD_STR=$(jq -n --arg v "Hola" '$v')
-
-          # Opción B: usar el archivo seleccionado -> enviarlo como string JSON
           PAYLOAD_STR=$(jq -c . "$FILE")
 
-          # Body correcto: parameters como objeto (no lista)
           BODY=$(jq -n \
             --arg payload "$PAYLOAD_STR" \
             '{
@@ -148,7 +125,6 @@ jobs:
           echo "Body (primeros 300 chars del valor de payload):"
           echo "$BODY" | jq -r '.executionData.parameters.payload' | head -c 300; echo
 
-          # Endpoint moderno con jobType en la ruta
           RES_HEADERS=$(mktemp)
           RES_BODY=$(mktemp)
 
@@ -159,7 +135,7 @@ jobs:
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs/Pipeline/instances")
 
           echo "HTTP status: $HTTP_STATUS"
-          echo "Body crudo de la respuesta (normalmente vacío en 202):"
+          echo "Body crudo de la respuesta:"
           cat "$RES_BODY" || true
           echo
 
@@ -167,11 +143,11 @@ jobs:
             echo "La API devolvió error (HTTP $HTTP_STATUS)"; exit 1
           fi
 
-          # Extraer Location y obtener instanceId
           INSTANCE_URL=$(awk -F': ' 'tolower($1)=="location"{print $2}' "$RES_HEADERS" | tr -d '\r')
           if [ -z "$INSTANCE_URL" ]; then
             echo "No vino Location en la respuesta; no puedo determinar el jobInstanceId"; exit 1
           fi
+
           echo "Location: $INSTANCE_URL"
 
           INSTANCE_ID="${INSTANCE_URL##*/}"
