@@ -1,6 +1,9 @@
-
 {
-  "solicitud": {
-    "descripcion": "Quiero predecir cuánto tiempo (minutos) está un cliente al chat..."
-  }
+  "action":"train",
+  "request":"Predecir el canal favorito de un usuario a partir de su historial de conversaciones usando Gracia/conversaciones_pe.",
+  "experiment_name_input":"exp_canal_favorito_test_v4",
+  "alias":"clf_canal_favorito_test_v4",
+  "domain":"CHATBOT",
+  "description":"Clasificación del canal favorito a partir de Gracia/conversaciones_pe.",
+  "timeout_train":120
 }
