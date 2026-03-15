@@ -56,7 +56,7 @@ jobs:
       # --- OPCIONAL HABILITADO: genera {"payload":"Hola"} y lo prioriza ---
       - name: (Opcional) Crear un JSON mínimo {"payload":"Hola"}
         id: override-file
-        if: ${{ true }}  # <--- habilitado
+        if: ${{ false }}  # <--- habilitado
         shell: bash
         run: |
           set -euo pipefail
