@@ -1,4 +1,3 @@
-
 name: Trigger Fabric Pipeline
 
 on:
@@ -34,7 +33,7 @@ jobs:
           else
             FILE=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep -E '^prompts/.*\.json$' | head -n 1 || true)
             if [ -z "$FILE" ]; then
-              FILE=$(ls prompts/*.json | head -n 1 || true)
+              FILE=$(ls prompts/*.json 2>/dev/null | head -n 1 || true)
             fi
           fi
 
@@ -53,6 +52,18 @@ jobs:
           FILE="${{ steps.pick-file.outputs.file }}"
           echo "Validando: $FILE"
           jq . "$FILE" > /dev/null
+
+      # --- OPCIONAL HABILITADO: genera {"payload":"Hola"} y lo prioriza ---
+      - name: (Opcional) Crear un JSON mínimo {"payload":"Hola"}
+        id: override-file
+        if: ${{ true }}  # <--- habilitado
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p prompts
+          echo '{"payload":"Hola"}' > prompts/demo_hola.json
+          echo "Se creó prompts/demo_hola.json con {\"payload\":\"Hola\"}"
+          echo "file=prompts/demo_hola.json" >> "$GITHUB_OUTPUT"
 
       - name: Obtener token Azure AD
         id: token
@@ -80,68 +91,88 @@ jobs:
           echo "Listando workspaces visibles para el SP..."
           curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             "https://api.fabric.microsoft.com/v1/workspaces" | jq .
-      
+
       - name: Probar acceso - listar items del workspace
         shell: bash
         run: |
           echo "Listando items del workspace ${{ secrets.FABRIC_WORKSPACE_ID }}..."
           curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items" | jq .
-      
-      - name: Probar acceso-  obtener item específico (pipeline)
+
+      - name: Probar acceso - obtener item específico (pipeline)
         shell: bash
         run: |
           echo "Obteniendo el item (pipeline) por ID..."
           curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}" | jq .
-            
-      - name: Obtener DataPipeline
+
+      - name: Obtener DataPipelines del workspace
         shell: bash
         run: |
-          echo "Obteniendo el item (pipeline) por ID..."
+          echo "Listando DataPipelines..."
           curl -s -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/dataPipelines" | jq .
 
-      - name: Ejecutar Data Pipeline (job instance)
+      - name: Ejecutar Data Pipeline (params simples y capturar Location)
+        id: run-pipeline
         shell: bash
         run: |
           set -euo pipefail
-          FILE="${{ steps.pick-file.outputs.file }}"
 
-          # 1) JSON del archivo -> STRING (una sola línea)
+          # Elegir archivo: override (si existe) o el detectado
+          FILE="${{ steps.pick-file.outputs.file }}"
+          OVERRIDE="${{ steps.override-file.outputs.file }}"
+          if [ -n "${OVERRIDE:-}" ]; then
+            FILE="$OVERRIDE"
+          fi
+
+          echo "Archivo a enviar como payload: $FILE"
+
+          # Opción A (comentada): Forzar "Hola" como string
+          # PAYLOAD_STR=$(jq -n --arg v "Hola" '$v')
+
+          # Opción B: usar el archivo seleccionado -> enviarlo como string JSON
           PAYLOAD_STR=$(jq -c . "$FILE")
 
-          # 2) Construimos el body con parameters como LISTA (name/value)
+          # Body correcto: parameters como objeto (no lista)
           BODY=$(jq -n \
-            --arg pipelineName "pl_PSI" \
             --arg payload "$PAYLOAD_STR" \
             '{
                executionData: {
-                 pipelineName: $pipelineName,
-                 parameters: [
-                   { "name": "payload", "value": $payload }
-                 ]
+                 parameters: {
+                   payload: $payload
+                 }
                }
              }')
 
-          echo "Payload enviado a Fabric (primeros 300 chars):"
-          echo "$BODY" | jq -r '.executionData.parameters[0].value' | head -c 300; echo
+          echo "Body (primeros 300 chars del valor de payload):"
+          echo "$BODY" | jq -r '.executionData.parameters.payload' | head -c 300; echo
 
-          RES=$(curl -s -w "\nHTTP_STATUS:%{http_code}\n" -X POST \
+          # Endpoint moderno con jobType en la ruta
+          RES_HEADERS=$(mktemp)
+          RES_BODY=$(mktemp)
+
+          HTTP_STATUS=$(curl -s -o "$RES_BODY" -D "$RES_HEADERS" -w "%{http_code}" -X POST \
             -H "Authorization: Bearer ${{ steps.token.outputs.access_token }}" \
             -H "Content-Type: application/json" \
-            -d "$BODY" \
-            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs/instances?jobType=Pipeline")
+            --data "$BODY" \
+            "https://api.fabric.microsoft.com/v1/workspaces/${{ secrets.FABRIC_WORKSPACE_ID }}/items/${{ secrets.FABRIC_PIPELINE_ID }}/jobs/Pipeline/instances")
 
-          HTTP_STATUS=$(echo "$RES" | tr -d '\r' | sed -n 's/HTTP_STATUS://p')
-          BODY_RES=$(echo "$RES" | sed '/HTTP_STATUS:/d')
-
-          echo "Respuesta de Fabric (status $HTTP_STATUS):"
-          echo "$BODY_RES" | jq . || echo "$BODY_RES"
+          echo "HTTP status: $HTTP_STATUS"
+          echo "Body crudo de la respuesta (normalmente vacío en 202):"
+          cat "$RES_BODY" || true
+          echo
 
           if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
-            echo "La API de Fabric devolvió error (HTTP $HTTP_STATUS)"; exit 1
+            echo "La API devolvió error (HTTP $HTTP_STATUS)"; exit 1
           fi
 
-          INSTANCE_ID=$(echo "$BODY_RES" | jq -r '.id // .instanceId // empty')
+          # Extraer Location y obtener instanceId
+          INSTANCE_URL=$(awk -F': ' 'tolower($1)=="location"{print $2}' "$RES_HEADERS" | tr -d '\r')
+          if [ -z "$INSTANCE_URL" ]; then
+            echo "No vino Location en la respuesta; no puedo determinar el jobInstanceId"; exit 1
+          fi
+          echo "Location: $INSTANCE_URL"
+
+          INSTANCE_ID="${INSTANCE_URL##*/}"
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
