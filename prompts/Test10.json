@@ -4,7 +4,7 @@
   "scoring_input": [
     {
       "clientId": "C-000101",
-      "total_conversaciones": 52,
+      "total_conversaciones": 51,
       "max_duracion": 980,
       "avg_duracion": 315.4,
       "exitosas": 1,
