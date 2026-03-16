@@ -1,5 +1,71 @@
 {
-  "solicitud": {
-    "descripcion": "Quiero predecir cuánto tiempo (minutos) está un cliente al chat.. ."
-  }
+  "action": "score",
+  "alias": "clf_canal_favorito_test_v4",
+  "scoring_input": [
+    {
+      "clientId": "C-000101",
+      "total_conversaciones": 52,
+      "max_duracion": 980,
+      "avg_duracion": 315.4,
+      "exitosas": 1,
+      "abandonos": 0
+    },
+    {
+      "clientId": "C-000102",
+      "total_conversaciones": 17,
+      "max_duracion": 460,
+      "avg_duracion": 221.0,
+      "exitosas": 1,
+      "abandonos": 0
+    },
+    {
+      "clientId": "C-000103",
+      "total_conversaciones": 8,
+      "max_duracion": 390,
+      "avg_duracion": 185.5,
+      "exitosas": 1,
+      "abandonos": 0
+    },
+    {
+      "clientId": "C-000104",
+      "total_conversaciones": 33,
+      "max_duracion": 720,
+      "avg_duracion": 240.8,
+      "exitosas": 1,
+      "abandonos": 0
+    },
+    {
+      "clientId": "C-000105",
+      "total_conversaciones": 64,
+      "max_duracion": 1100,
+      "avg_duracion": 355.2,
+      "exitosas": 1,
+      "abandonos": 0
+    },
+    {
+      "clientId": "C-000106",
+      "total_conversaciones": 25,
+      "max_duracion": 510,
+      "avg_duracion": 210.7,
+      "exitosas": 1,
+      "abandonos": 0
+    },
+    {
+      "clientId": "C-000107",
+      "total_conversaciones": 5,
+      "max_duracion": 300,
+      "avg_duracion": 160.0,
+      "exitosas": 1,
+      "abandonos": 0
+    },
+    {
+      "clientId": "C-000108",
+      "total_conversaciones": 41,
+      "max_duracion": 905,
+      "avg_duracion": 298.3,
+      "exitosas": 1,
+      "abandonos": 0
+    }
+  ],
+  "comment": "Prueba de scoring con 8 registros dummy"
 }
