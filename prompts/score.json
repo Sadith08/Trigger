@@ -1,0 +1,6 @@
+{
+  "action": "retrain",
+  "model_name": "clf_canal_favorito_180326",
+  "filter_column": "FechaId",
+  "filter_value": "2026-01-01"
+}
